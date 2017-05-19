@@ -1,4 +1,5 @@
 (in-package :nova)
+(annot:enable-annot-syntax)
 
 (defmacro unwrap-event (event event-type event-params &body body)
   "Unwraps the parameters of an event of type \"event-type\" into \"event-params\"."
@@ -25,7 +26,7 @@
 			       key-handlers)))
 	 (values retval handled)))))
 
-(export 'defevents)
+@export
 (defmacro defevents (scene-decl world-sym &body event-handlers)
   "Creates a scene-event method for \"scene-class\".
    Usage: (defevents my-scene world (:keydown (:scancode-espace nil)))"

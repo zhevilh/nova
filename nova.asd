@@ -5,14 +5,18 @@
   :serial t
   :pathname "src"
   :components ((:file "../package")
-	       (:file "render")
-	       (:file "texture")
-	       (:file "audio")
+	       (:file "matrices")
+	       (:file "shaders")
+	       (:file "gl-utils")
 	       (:file "drawing")
-	       (:file "sprite")
-	       (:file "animation")
-	       (:file "scene")
+	       (:file "drawing-2d")
+	       (:file "audio")
 	       (:file "event")
+	       (:file "scene")
+	       (:file "physics-2d")
                (:file "nova"))
-  :depends-on (:alexandria :sdl2 :sdl2-image :sdl2-mixer :sdl2-ttf :ether))
+  :depends-on
+  (:alexandria
+   :ether :cl-fad :bordeaux-threads :trivial-garbage :cl-plus-c :rtg-math
+   :cl-annot :cl-opengl :fset :sdl2 :sdl2-image :sdl2-mixer))
 

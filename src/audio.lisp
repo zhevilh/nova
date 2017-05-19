@@ -1,4 +1,5 @@
 (in-package :nova)
+(annot:enable-annot-syntax)
 
 (defvar *loaded-music* nil)
 (defvar *loaded-samples* nil)
@@ -8,13 +9,8 @@
 	 (*loaded-samples* (make-hash-table)))
      (unwind-protect
 	  (progn
-	    (format t "Initializing SDL2 mixer...")
 	    (sdl2-mixer:init ,@flags)
-	    (format t "OK.~%")
-
-	    (format t "Opening audio channels...")
 	    (sdl2-mixer:open-audio 44100 :s16sys 2 1024)
-	    (format t "OK.~%")
 	    
 	    ,@body)
        (loop for m being the hash-values in *loaded-music*
@@ -25,22 +21,22 @@
        (sdl2-mixer:close-audio)
        (sdl2-mixer:quit))))
 
-(export 'load-music)
+@export
 (defun load-music (path)
   "string -> IO music"
   (setf (gethash path *loaded-music*) (sdl2-mixer:load-music path)))
 
-(export 'load-sample)
+@export
 (defun load-sample (path)
   "string -> IO sample"
   (setf (gethash path *loaded-samples*) (sdl2-mixer:load-wav path)))
 
-(export 'play-music)
+@export
 (defun play-music (music &optional (loops 0))
   "music -> IO"
   (sdl2-mixer:play-music music loops))
 
-(export 'play-sample)
+@export
 (defun play-sample (sample &optional (channel -1))
   "sample -> IO"
   (sdl2-mixer:play-channel channel sample 0))
