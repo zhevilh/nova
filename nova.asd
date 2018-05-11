@@ -3,20 +3,21 @@
   :author "William Flageol"
   :license "MIT"
   :serial t
-  :pathname "src"
+  :pathname "src/"
   :components ((:file "../package")
-	       (:file "matrices")
-	       (:file "shaders")
-	       (:file "gl-utils")
-	       (:file "drawing")
-	       (:file "drawing-2d")
+	       (:file "geometry")
+	       (:file "timing")
+	       (:file "resources")
+	       (:file "colors")
+	       (:file "graphics-2d")
+	       (:file "text")
 	       (:file "audio")
-	       (:file "event")
-	       (:file "scene")
-	       (:file "physics-2d")
-               (:file "nova"))
+	       (:file "events")
+	       (:file "joystick")
+	       (:file "form")
+	       (:file "nova"))
   :depends-on
   (:alexandria
-   :ether :cl-fad :bordeaux-threads :trivial-garbage :cl-plus-c :rtg-math
-   :cl-annot :cl-opengl :fset :sdl2 :sdl2-image :sdl2-mixer))
-
+   :ether :cl-fad :cl-annot :sdl2-image :sdl2-mixer :sdl2 :sdl2-ttf
+   :bordeaux-threads :lisp-unit
+   :trivial-garbage))

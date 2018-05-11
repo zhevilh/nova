@@ -1,8 +1,6 @@
-(defpackage :%nova
-  (:use :cl :alexandria :ether))
-
 (defpackage :nova
-  (:use :cl :%nova :alexandria :ether))
+  (:use :cl :ether :alexandria)
+  (:import-from :lisp-unit :define-test :run-tests))
 
-(defpackage :nova-2d
-  (:use :cl :%nova :nova :alexandria :ether))
+(defpackage :nova-form
+  (:use :cl :ether :alexandria :nova))
