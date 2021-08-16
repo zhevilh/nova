@@ -7,19 +7,30 @@
   target-area
   color)
 
-(defun texture-function (texture)
+(defun texture-function (texture &key blend-mode flip)
   (lambda (renderer source-area target-area color)
     (draw-texture texture target-area
                   :renderer renderer
                   :source-area source-area
-                  :color color)))
+                  :color color
+                  :blend-mode blend-mode
+                  :flip flip)))
 
 (defparameter clear-function
   (lambda (renderer source-area target-area color)
     (declare (ignore source-area))
     (clear-area target-area
                 :renderer renderer
-                :color color)))
+                :color color
+                :blend-mode :blend)))
+
+(defparameter rect-function
+  (lambda (renderer source-area target-area color)
+    (declare (ignore source-area))
+    (draw-rect target-area
+               :renderer renderer
+               :color color
+               :blend-mode :blend)))
 
 (defun draw-with-info (info renderer)
   (with-slots (draw-function source-area target-area color) info
@@ -35,10 +46,10 @@
 (defun get-boundaries (draw-info-list)
   (when-> (remove-if-not #'identity draw-info-list)
           (mapcar #'draw-info-target-area %)
-          (rectangle (apply #'min (mapcar #'left %))
-                     (apply #'min (mapcar #'top %))
-                     (apply #'max (mapcar #'right %))
-                     (apply #'max (mapcar #'bottom %)))))
+          (rectangle (apply #'min (mapcar #'area-left %))
+                     (apply #'min (mapcar #'area-top %))
+                     (apply #'max (mapcar #'area-right %))
+                     (apply #'max (mapcar #'area-bottom %)))))
 
 @export
 (defun resolve (arg)
@@ -53,21 +64,25 @@
 (defvar *font*)
 (defvar *fore-color* +white+)
 (defvar *texture-color* +white+)
-(defvar *back-color* +black+)
+(defvar *back-color* nil)
 
-(defun resolve-slot (slot)
-  (when *binding*
-    (if (functionp slot)
-        (funcall slot *binding*)
-        (slot-value *binding* slot))))
+(defun resolve-slot (slot &optional nil-value)
+  (-> (when *binding*
+        (cond
+          ((functionp slot) (funcall slot *binding*))
+          ((listp *binding*) (getf *binding* slot))
+          ((hash-table-p *binding*) (gethash slot *binding*))
+          (t (slot-value *binding* slot))))
+      (or % nil-value)))
 
 @export
-(defun bind-slot (slot)
-  (lambda () (resolve-slot slot)))
+(defun bind-slot (slot &optional nil-value)
+  (lambda () (resolve-slot slot nil-value)))
 
 @export
-(defun bind-timing-slot (slot)
-  (lambda () (run-timing (resolve-slot slot))))
+(defun bind-timing-slot (slot &optional nil-timing-value)
+  (lambda () (-> (resolve-slot slot nil)
+                 (if % (run-timing %) nil-timing-value))))
 
 @export
 (defun bind-format (format &rest slot-args)
@@ -80,42 +95,100 @@
        ,@body)))
 
 @export
-(defun nova-text (text &key font fore-color)
-  (let ((font (or font *font*))
-        (fore-color (or fore-color *fore-color*)))
-    (lambda (draw-info)
-      (with-resolve (font fore-color text)
-        (with-new (draw-function color target-area) draw-info
-          (-> (render-text font text)
-              (setf draw-function (texture-function %)
-                    color fore-color
-                    target-area (make-area (point 0 0) (texture-size %)))))))))
+(defmacro bind-self (symbol &body body)
+  `(lambda ()
+     (let ((,symbol *binding*))
+       ,@body)))
 
 @export
-(defun nova-texture (texture &key target-size source-area texture-color)
+(defmacro bind-keys ((&rest binding-keys) &body body)
+  `(lambda ()
+     (let (,.(loop for key in binding-keys
+                   collect `(,key (getf *binding* (make-keyword ',key)))))
+       ,@body)))
+
+@export
+(defun nova-text (text &key font fore-color back-color)
+  (let ((font (or font *font*))
+        (fore-color (or fore-color *fore-color*))
+        (back-color (or back-color *back-color*)))
+    (lambda (draw-info)
+      (with-resolve (font fore-color back-color text)
+        (-> (render-active-text font text)
+            (list
+             (if back-color
+                 (with-new (draw-function color target-area) draw-info
+                   (setf draw-function clear-function
+                         color back-color
+                         target-area (make-area (point 0 0) (texture-size %)))))
+             (with-new (draw-function color target-area) draw-info
+               (setf draw-function (texture-function %)
+                     color fore-color
+                     target-area (make-area (point 0 0) (texture-size %))))))))))
+
+@export
+(defun nova-text-multi (text &key font fore-color back-color)
+  (lambda (draw-info)
+    (with-resolve (font fore-color back-color text)
+      (map-draw-info
+       (let ((lines (cl-ppcre:split "\\|" text))
+             (height (nth-value 1 (sdl2-ttf:size-text
+                                   (gethash font nova::*open-fonts*) text))))
+         (when (string= "" (car lines))
+              (setf lines (cdr lines)))
+         (loop for line in lines
+               for i = 0 then (1+ i)
+               when (> (length line) 0)
+               collect (place (point 0 (* i (+ height 5)))
+                              (nova-text
+                               line
+                               :font font
+                               :fore-color fore-color
+                               :back-color back-color))))
+       draw-info))))
+
+@export
+(defun nova-texture (texture &key target-size source-area texture-color blend-mode
+                               flip)
   (let ((texture-color (or texture-color *texture-color*)))
     (lambda (draw-info)
-      (with-resolve (texture texture-color)
+      (with-resolve (texture texture-color flip)
         (when texture
           (with-new (draw-function color (info-source-area source-area)
                      target-area)
               draw-info
-            (setf draw-function (texture-function texture)
+            (setf draw-function (texture-function texture
+                                                  :blend-mode blend-mode
+                                                  :flip flip)
                   info-source-area source-area
                   target-area (make-area (point 0 0) (or target-size
                                                          (texture-size texture)))
                   color texture-color)))))))
 
 @export
-(defun nova-area (area &key back-color)
-  (let ((back-color (or back-color *back-color*)))
+(defun nova-area (area &key
+                         (fore-color nil fore-color?)
+                         (back-color nil back-color?))
+  (let ((back-color (if back-color? back-color *back-color*))
+        (fore-color (if fore-color? fore-color *fore-color*)))
     (lambda (draw-info)
-      (with-resolve (area back-color)
+      (with-resolve (area back-color fore-color)
         (when area
-          (with-new (draw-function target-area color) draw-info
-            (setf draw-function clear-function
-                  target-area area
-                  color back-color)))))))
+          (-> nil
+              (if fore-color?
+                  (push (with-new (draw-function target-area color) draw-info
+                          (setf draw-function rect-function
+                                target-area area
+                                color fore-color))
+                        %)
+                  %)
+              (if back-color?
+                  (push (with-new (draw-function target-area color) draw-info
+                          (setf draw-function clear-function
+                                target-area area
+                                color back-color))
+                        %)
+                  %)))))))
 
 @export
 (defun align (h-align v-align &rest elements)
@@ -134,14 +207,14 @@
         (setf target-area
               (with-new (x y w h) target-area
                 (when (or (eq direction :all) (eq direction :left))
-                  (setf x (max (+ (left *draw-area*) padding) x)))
+                  (setf x (max (+ (area-left *draw-area*) padding) x)))
                 (when (or (eq direction :all) (eq direction :top))
-                  (setf y (max (+ (top *draw-area*) padding) y)))
+                  (setf y (max (+ (area-top *draw-area*) padding) y)))
                 (when (or (eq direction :all) (eq direction :bottom))
-                  (-> (- (+ y h) (- (bottom *draw-area*) padding))
+                  (-> (- (+ y h) (- (area-bottom *draw-area*) padding))
                       (decf y (max 0 %))))
                 (when (or (eq direction :all) (eq direction :right))
-                  (-> (- (+ x w) (- (right *draw-area*) padding))
+                  (-> (- (+ x w) (- (area-right *draw-area*) padding))
                       (decf x (max 0 %))))))))))
 
 @export
@@ -177,14 +250,24 @@
                                           h (h size)))))))))
 
 @export
-(defun scale (ratio center? &rest elements)
+(defun scale (ratio screen-point &rest elements)
   (lambda (draw-info)
     (with-resolve (ratio)
       (map-new-info (target-area) (map-draw-info elements draw-info)
         (setf target-area (-> (scale-size ratio target-area)
-                              (if center?
-                                  (align-in % target-area)
-                                  %)))))))
+                              (cond
+                                ((eq screen-point t)
+                                 (align-in % target-area))
+                                ((typep screen-point 'point)
+                                 (make-area
+                                  (point (+ (x %)
+                                            (* (- (x screen-point) (x %))
+                                               (- 1 ratio)))
+                                         (+ (y %)
+                                            (* (- (y screen-point) (y %))
+                                               (- 1 ratio))))
+                                  %))
+                                (t %))))))))
 
 @export
 (defmacro style ((&key font fore-color back-color texture-color) &body body)
@@ -207,6 +290,12 @@
                               `(resolve ,expr)
                               expr))
                         body)))))
+
+@export
+(defun enable (enabled? &rest elements)
+  (lambda (draw-info)
+    (with-resolve (enabled?)
+      (when enabled? (map-draw-info elements draw-info)))))
 
 @export
 (defun box (&rest elements)

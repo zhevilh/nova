@@ -1,6 +1,7 @@
 (in-package #:nova)
 (cl-annot:enable-annot-syntax)
 
+@export
 (defgeneric handle-event (scene event-type event))
 (defmethod handle-event (scene event-type event)
   (declare (ignore scene event-type event)))
@@ -36,9 +37,13 @@
 (defmacro-event define-mousebuttondown :mousebuttondown)
 @export
 (defmacro-event define-mousebuttonup :mousebuttonup)
+@export
+(defmacro-event define-mousewheel :mousewheel)
 
 @export
 (defmacro-event define-joybuttondown :joybuttondown)
+@export
+(defmacro-event define-joybuttonup :joybuttonup)
 
 @export
 (defmacro define-quit ((scene-method-arg) &body body)

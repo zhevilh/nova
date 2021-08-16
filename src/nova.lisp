@@ -1,31 +1,76 @@
 (in-package :nova)
 (annot:enable-annot-syntax)
 
-;; Stupid fix because sdl2-ttf won't load correctly for some reason.
-(load (merge-pathnames "src/autowrap.lisp" (asdf:system-source-directory :sdl2-ttf)))
+(define-condition quit-game () ())
 
 (defvar *window*)
-(defvar *next-scene* nil)
-(defvar *quit?* nil)
-
-@export
-(defun change-scene (next-scene)
-  (load-scene next-scene)
-  (setf *next-scene* next-scene))
+(defvar *end-scene?*)
+(defvar *error-handler*)
+(defvar *fps*)
 
 @export
 (defun quit-game ()
-  (setf *quit?* t))
+  (error 'quit-game))
 
 @export
-(defun run-game (title width height initial-scene
+(defun end-scene ()
+  (setf *end-scene?* t))
+
+@export
+(defun run-scene (scene)
+  (let (*end-scene?*
+        (last-frame-internal-time 0)
+        (internal-time-per-frame
+          (/ internal-time-units-per-second *fps*)))
+    (unwind-protect
+         (with-loaded-textures
+           (handler-bind
+               ((error (lambda (c)
+                         (when *error-handler*
+                           (funcall *error-handler* c)))))
+             (load-scene scene)
+             (sdl2:with-sdl-event (event)
+               (loop
+                 until *end-scene?*
+                 do (progn
+                      (tick-active-texts)
+                      (draw-scene scene)
+                      (sdl2:render-present *renderer*)
+                      (setf last-frame-internal-time
+                            (get-internal-real-time))
+                      (loop as rc = (sdl2:next-event event)
+                            until (= rc 0)
+                            do (handle-event
+                                scene
+                                (sdl2:get-event-type event)
+                                event))
+                      (idle-scene scene)
+                      (sleep
+                       (/
+                        (max 0 (- internal-time-per-frame
+                                  (- (get-internal-real-time)
+                                     last-frame-internal-time)))
+                        internal-time-units-per-second)))))
+             (return-scene scene)))
+      (unload-scene scene))))
+
+@export
+(defun run-game (title width height controller
 		 &key
 		   (fps 24)
+                   (scale-filtering :anisotropic)
 		   fullscreen-mode
 		   open-joysticks
-		   (music-volume 1))
+		   (music-volume 1)
+                   error-bind)
   (unwind-protect
        (sdl2:with-init (:everything)
+         (sdl2-ffi.functions:sdl-set-hint sdl2-ffi:+sdl-hint-render-scale-quality+
+                                          (ecase scale-filtering
+                                            (:nearest "0")
+                                            (:linear "1")
+                                            (:anisotropic "2")))
+         (reset-time)
 	 (sdl2-ttf:init)
 	 (with-joysticks
 	   (when open-joysticks
@@ -39,41 +84,41 @@
 		 (sdl2:show-window *window*)
 		 (sdl2:set-window-fullscreen *window* fullscreen-mode)
 		 (with-renderer *window*
-		   (let ((last-frame-internal-time 0)
-			 (internal-time-per-frame
-                           (/ internal-time-units-per-second fps))
-			 current-scene
-			 *quit?*)
-		     (change-scene initial-scene)
-		     (sdl2:with-sdl-event (event)
-		       (loop
-                         until *quit?*
-                         do (progn
-                              (setf last-frame-internal-time
-                                    (get-internal-real-time))
-                              (loop as rc = (sdl2:next-event event)
-                                    until (or *quit?* (= rc 0))
-                                    do (handle-event current-scene
-                                                     (sdl2:get-event-type event)
-                                                     event))
-                              (if *next-scene*
-                                  (setf current-scene *next-scene*
-                                        *next-scene* nil)
-                                  (progn
-                                    (idle-scene current-scene)
-                                    (tick-active-texts)
-                                    (draw-scene current-scene)
-                                    (sdl2:render-present *renderer*)
-                                    (sleep
-                                     (/ (max 0 (- internal-time-per-frame
-                                                  (- (get-internal-real-time)
-                                                     last-frame-internal-time)))
-                                        internal-time-units-per-second))))))))))))))
+                   (let ((*fps* fps)
+                         (*error-handler* error-bind))
+                     (randomize)
+                     (handler-case 
+                         (if (functionp controller)
+                             (funcall controller)
+                             (run-scene controller))
+                       (quit-game ())))))))))
+    (tg:gc)))
+
+@export
+(defun run-music-player (controller-fn &key
+                                         (music-volume 1)
+                                         music)
+  (unwind-protect
+       (sdl2:with-init (:everything)
+         (with-audio (:mp3 :ogg)
+           (set-music-volume music-volume)
+           (when music
+             (setf music (load-music music))
+             (play-music music))
+           (handler-case
+               (funcall controller-fn)
+             (quit-game ()))
+           (pause-music)))
     (tg:gc)))
 
 @export
 (defgeneric load-scene (scene))
 (defmethod load-scene (scene)
+  (declare (ignore scene)))
+
+@export
+(defgeneric unload-scene (scene))
+(defmethod unload-scene (scene)
   (declare (ignore scene)))
 
 @export
@@ -84,6 +129,11 @@
 @export
 (defgeneric idle-scene (scene))
 (defmethod idle-scene (scene)
+  (declare (ignore scene)))
+
+@export
+(defgeneric return-scene (scene))
+(defmethod return-scene (scene)
   (declare (ignore scene)))
 
 @export
@@ -99,3 +149,12 @@
 @export
 (defun relative-cursor-mode (enabled)
   (sdl2:set-relative-mouse-mode enabled))
+
+@export
+(defun raise-window ()
+  (sdl2:raise-window *window*))
+
+@export
+(defun cursor-position ()
+  (multiple-value-bind (x y) (sdl2:mouse-state)
+    (point x y)))

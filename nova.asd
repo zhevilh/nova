@@ -15,9 +15,10 @@
 	       (:file "events")
 	       (:file "joystick")
 	       (:file "form")
+               (:file "presentation")
 	       (:file "nova"))
   :depends-on
   (:alexandria
-   :ether :cl-fad :cl-annot :sdl2-image :sdl2-mixer :sdl2 :sdl2-ttf
-   :bordeaux-threads :lisp-unit
+   :ether :cl-fad :cl-annot :sdl2 :sdl2-image :sdl2-mixer :sdl2-ttf
+   :bordeaux-threads :lisp-unit :cl-ppcre
    :trivial-garbage))

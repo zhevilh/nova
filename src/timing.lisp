@@ -1,40 +1,64 @@
 (in-package #:nova)
 (cl-annot:enable-annot-syntax)
 
+(defparameter *timer* (timer))
+
+@export
+(defun reset-time ()
+  (setf *timer* (timer)))
+
 @export
 (defun get-time ()
-  (/ (get-internal-real-time) internal-time-units-per-second))
+  (timer-time *timer*))
+
+@export
+(defun freeze-time ()
+  (pause-timer! *timer*))
+
+@export
+(defun time-frozen? ()
+  (timer-started? *timer*))
+
+@export
+(defun unfreeze-time ()
+  (resume-timer! *timer*))
+
+@export
+(defun offset-time (offset)
+  (push-timer! *timer* offset))
 
 @export-class
 (define-class timing ()
-  (start-time (get-time))
+  timer
   duration
   loop-type
   output-function)
 
 @export
-(defun timing (duration loop-type &optional output-function)
+(defun timing (duration loop-type &key (timer (timer)) output)
   (make-instance 'timing
+                 :timer timer
 		 :duration duration
 		 :loop-type loop-type
-		 :output-function output-function))
+		 :output-function output))
 
 @export
-(defun timing-elements (elements duration loop-type)
+(defun timing-elements (elements duration loop-type &key (timer (timer)))
   (let* ((n (length elements))
 	 (array (make-array n :initial-contents elements)))
     (timing duration loop-type
-	    (lambda (r) (aref array (min (1- n) (floor (* n r))))))))
+            :timer timer
+	    :output (lambda (r) (aref array (min (1- n) (floor (* n r))))))))
 
 @export
 (defun run-timing (timing)
-  (with-slots (start-time duration loop-type output-function) timing
-    (let ((time (- (get-time) start-time)))
+  (with-slots (timer duration loop-type output-function) timing
+    (let ((time (timer-time timer)))
       (-> (ecase loop-type
 	    (:no-loop
 	     (/ (min duration time) duration))
 	    (:loop
-	     (/ (mod time duration) duration))
+              (/ (mod time duration) duration))
 	    (:loop-back
 	     (let* ((total-duration (* 2 duration))
 		    (time (mod time total-duration)))
@@ -47,113 +71,80 @@
 	      %)))))
 
 @export
-(defun reset-timing (timing)
-  (with-new (start-time duration) timing
-    (setf start-time (get-time))))
+(defun reset-timing (timing &optional (offset 0))
+  (with-new (timer) timing
+    (setf timer (timer))
+    (push-timer! timer offset)))
+
+@export
+(defun timing-progress (timing)
+  (with-slots (timer duration loop-type) timing
+    (-> (timer-time timer)
+        (ecase loop-type
+          (:no-loop %)
+          ((:loop :loop-back) (mod % duration))))))
+
+@export
+(defun pause-timing (timing)
+  (with-new (timer) timing
+    (pause-timer! timer)))
+
+@export
+(defun resume-timing (timing)
+  (with-new (timer) timing
+    (resume-timer! timer)))
 
 (define-class sequence-action ()
   action
-  priority
   duration)
 
-(define-class sequencer ()
-  (action-priority -1)
+(define-class sequencer (:mutable? t)
   (action-end-time 0)
-  queue)
+  sequence)
 
 @export
 (defun sequencer () (make-instance 'sequencer))
 
 @export
-(defun sequence-action (sequencer duration action &key (priority 0))
-  (with-new (queue) sequencer
-	    (let ((sa (make-instance 'sequence-action
-			     :duration duration
-        :priority priority
-        :action action)))
-      (setf queue
-	    (if (eq :override priority)
-	 (list sa)
-  (-> queue
-      (remove-if (lambda (p) (< p priority)) % :key #'sequence-action-priority)
-      (append % (list sa))))))))
+(defmacro sequence-action (duration &body form)
+  `(make-instance 'sequence-action
+                  :duration ,duration
+                  :action (lambda ()
+                            ,@form)))
 
 @export
-(defmacro sequence-action! (sequencer duration action &key (priority 0))
-  `(setf ,sequencer (sequence-action ,sequencer ,duration ,action :key ,priority)))
+(defun bind-sequence (&rest sequences)
+  (-> (mapcar #'ensure-list sequences)
+      (apply #'append %)))
 
 @export
-(defmacro do-sequence-action (sequencer duration action-form &key (priority 0))
-  `(sequence-action ,sequencer ,duration (lambda () ,action-form)
-		    :priority ,priority))
+(defun sequencer-append! (sequencer &rest sequences)
+  (with-slots (sequence) sequencer
+    (setf sequence (apply #'bind-sequence (.-> sequencer sequence) sequences))))
 
 @export
-(defmacro do-sequence-action! (sequencer duration action-form &key (priority 0))
-  `(setf ,sequencer
-	 (do-sequence-action ,sequencer ,duration ,action-form :priority ,priority)))
+(defun sequencer-override! (sequencer &rest sequences)
+  (with-slots (sequence action-end-time) sequencer
+    (setf sequence (bind-sequence sequences)
+          action-end-time 0)))
 
 @export
-(defun tick-sequencer (sequencer)
-  (with-slots (action-end-time action-priority queue) sequencer
-    (if (and queue
-	     (with-slots (priority) (car queue)
-        (or (eq :override priority)
-	    (> priority action-priority)
-	    (>= (get-time) action-end-time))))
-	(tick-sequencer
-  (with-new (action-end-time action-priority queue) sequencer
-	    (let ((sa (pop queue)))
-      (with-slots (duration priority action) sa
-        (funcall action)
-        (setf action-end-time (+ (get-time) duration)
-	      action-priority priority)))))
-	sequencer)))
-
-@export
-(defmacro tick-sequencer! (sequencer)
-  `(setf ,sequencer (tick-sequencer ,sequencer)))
+(defun tick-sequencer! (sequencer)
+  (with-slots (action-end-time sequence) sequencer
+    (when (and sequence (>= (get-time) action-end-time))
+      (let ((actions (loop for sa = (pop sequence)
+                           collect sa
+                           until (or (not sequence) (> (.-> sa duration) 0)))))
+        (mapcar (compose #'funcall #'sequence-action-action) actions)
+        (setf action-end-time
+              (+ (get-time) (.-> (car (reverse actions)) duration)))))))
 
 @export
 (defun sequencer-idle? (sequencer)
-  (and (not (sequencer-queue sequencer))
-       (>= (get-time) (sequencer-action-end-time sequencer))))
+  (and (not (.-> sequencer sequence))
+       (let ((idle-since (- (get-time) (.-> sequencer action-end-time))))
+         (when (> idle-since 0) idle-since))))
 
-
-;; Testing
-(defmacro run-sequencer-test (&rest sequence-actions-definitions)
-  (with-gensyms (sequencer)
-    `(let ((,sequencer (sequencer)) %)
-       ,.(mapcar
-	  (lambda (d)
-     (destructuring-bind (priority duration action) d
-       `(setf ,sequencer (do-sequence-action ,sequencer ,duration ,action :priority ,priority))))
-   sequence-actions-definitions)
-       (tick-sequencer ,sequencer)
-       %)))
-
-(lisp-unit:define-test sequencer-basic-tests
-  (lisp-unit:assert-eq 1 (run-sequencer-test (0 0 (setf % 1))))
-  (lisp-unit:assert-eq 1 (run-sequencer-test (0 1 (setf % 1))
-          (0 0 (setf % 2))))
-  (lisp-unit:assert-eq 2 (run-sequencer-test (0 0 (setf % 1))
-					     (0 0 (setf % 2))))
-  (let (x)
-    (lisp-unit:assert-eq 3 (run-sequencer-test (0 0 (setf % 1))
-					       (0 0 (setf x t % 2))
-					       (0 0 (setf % 3))))
-    (lisp-unit:assert-true x)))
-
-(lisp-unit:define-test sequencer-priority-tests
-    (lisp-unit:assert-eq 1 (run-sequencer-test (1 1 (setf % 1))
-					       (0 0 (setf % 2))))
-  (lisp-unit:assert-eq 2 (run-sequencer-test (0 1 (setf % 1))
-					     (1 0 (setf % 2))))
-  (lisp-unit:assert-eq 3 (run-sequencer-test (2 1 (setf % 1))
-					     (2 2 (setf % 2))
-					     (:override 0 (setf % 3))))
-  (let (x)
-    (lisp-unit:assert-eq 3 (run-sequencer-test (3 0 (setf % 1))
-					       (1 1 (progn (setf % 2)
-							   (setf x t)))
-					       (2 0 (setf % 3))))
-    (lisp-unit:assert-false x)))
+@export
+(defun skip-sequence-action! (sequencer)
+  (setf (.-> sequencer action-end-time) 0))

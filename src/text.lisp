@@ -19,15 +19,14 @@
 	  (sdl2-ttf:open-font path size))))
 
 @export
-(defun render-text (font-key text &key renderer (scale-filtering :nearest))
+(defun render-text (font-key text &key renderer)
   (let ((font (gethash font-key *open-fonts*)))
     (when (not font)
       (error "Could not find open font."))
     (with-slots (r g b a) +white+
       (let* ((surface (sdl2-ttf:render-utf8-solid font text r g b a))
 	     (texture (load-texture surface
-				    :renderer renderer
-				    :scale-filtering scale-filtering)))
+				    :renderer renderer)))
 	(sdl2:free-surface surface)
 	(values texture (texture-size texture))))))
 
@@ -36,6 +35,8 @@
 
 @export
 (defun tick-active-texts ()
+  (dolist (text (set-difference *last-active-texts* *active-texts*))
+    (free-texture (active-text-texture text)))
   (setf *last-active-texts* *active-texts*)
   (setf *active-texts* nil))
 
@@ -58,3 +59,12 @@
     (pushnew at *active-texts*)
     (with-slots (texture) at
       (values texture (texture-size texture)))))
+
+@export
+(defun draw-text (font-key string target-area-or-point
+                  &key renderer color angle)
+  (-> (render-active-text font-key string)
+      (draw-texture % target-area-or-point
+                    :renderer renderer
+                    :color color
+                    :angle angle)))
