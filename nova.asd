@@ -16,7 +16,10 @@
 	       (:file "joystick")
 	       (:file "form")
                (:file "presentation")
-	       (:file "nova"))
+	       (:file "nova")
+               (:file "base-scene")
+               (:file "action-scene")
+               (:file "animation"))
   :depends-on
   (:alexandria
    :ether :cl-fad :cl-annot :sdl2 :sdl2-image :sdl2-mixer :sdl2-ttf

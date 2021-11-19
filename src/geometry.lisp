@@ -133,6 +133,11 @@
   (map-area (lambda (x) (* scale-ratio x)) area))
 
 @export
+(defun grow-area (value area)
+  (with-access (x y w h) area
+    (area (- x value) (- y value) (+ w (* 2 value)) (+ h (* 2 value)))))
+
+@export
 (defun scale-size (scale-ratio size)
   (map-size (lambda (x) (* scale-ratio x)) size))
 

@@ -20,7 +20,7 @@
 @export
 (defun alpha (new-alpha color)
   (with-new (a) color
-    (setf a new-alpha)))
+    (setf a (clamp (round new-alpha) 0 255))))
 
 @export
 (defun color-map-1 (fn c v)
@@ -51,6 +51,23 @@
 @export
 (defun color-reduce-a (fn c)
   (funcall fn (r c) (g c) (b c) (a c)))
+
+@export
+(defun from-hsv (h s v)
+  (let* ((c (* v s))
+         (x (* c (- 1 (abs- (mod (/ h 60) 2) 1))))
+         (m (- v c)))
+    (destructuring-bind (r g b)
+        (cond
+          ((< h 60) (list c x 0))
+          ((< h 120) (list x c 0))
+          ((< h 180) (list 0 c x))
+          ((< h 240) (list 0 x c))
+          ((< h 300) (list x 0 c))
+          (t (list c 0 x)))
+      (color (round (* 255 (+ r m)))
+             (round (* 255 (+ g m)))
+             (round (* 255 (+ b m)))))))
 
 (defmacro define-colors (&body definitions)
   `(progn

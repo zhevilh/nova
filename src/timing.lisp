@@ -13,7 +13,7 @@
 
 @export
 (defun freeze-time ()
-  (pause-timer! *timer*))
+  (in-place (pause-timer *timer*)))
 
 @export
 (defun time-frozen? ()
@@ -21,11 +21,11 @@
 
 @export
 (defun unfreeze-time ()
-  (resume-timer! *timer*))
+  (in-place (resume-timer *timer*)))
 
 @export
 (defun offset-time (offset)
-  (push-timer! *timer* offset))
+  (in-place (push-timer *timer* offset)))
 
 @export-class
 (define-class timing ()
@@ -54,27 +54,31 @@
 (defun run-timing (timing)
   (with-slots (timer duration loop-type output-function) timing
     (let ((time (timer-time timer)))
-      (-> (ecase loop-type
-	    (:no-loop
-	     (/ (min duration time) duration))
-	    (:loop
-              (/ (mod time duration) duration))
-	    (:loop-back
-	     (let* ((total-duration (* 2 duration))
-		    (time (mod time total-duration)))
-	       (/ (if (> time duration)
-		      (- total-duration time)
-		      time)
-		  duration))))
+      (-> (timing-function time duration loop-type)
 	  (if output-function
 	      (funcall output-function %)
 	      %)))))
 
 @export
+(defun timing-function (time duration loop-type)
+  (ecase loop-type
+    (:no-loop
+     (/ (min duration time) duration))
+    (:loop
+      (/ (mod time duration) duration))
+    (:loop-back
+     (let* ((total-duration (* 2 duration))
+            (time (mod time total-duration)))
+       (/ (if (> time duration)
+              (- total-duration time)
+              time)
+          duration)))))
+
+@export
 (defun reset-timing (timing &optional (offset 0))
   (with-new (timer) timing
     (setf timer (timer))
-    (push-timer! timer offset)))
+    (in-place (push-timer timer offset))))
 
 @export
 (defun timing-progress (timing)
@@ -87,12 +91,12 @@
 @export
 (defun pause-timing (timing)
   (with-new (timer) timing
-    (pause-timer! timer)))
+    (in-place (pause-timer timer))))
 
 @export
 (defun resume-timing (timing)
   (with-new (timer) timing
-    (resume-timer! timer)))
+    (in-place (resume-timer timer))))
 
 (define-class sequence-action ()
   action

@@ -1,6 +1,7 @@
 (in-package #:nova)
 (cl-annot:enable-annot-syntax)
 
+(defvar *parent-scene*)
 (defvar *renderer*)
 (defvar *loaded-textures*)
 
@@ -66,7 +67,10 @@
 (defun make-texture (width height &key renderer (pixel-format :rgba8888)
                                     blend-mode)
   (let ((texture (sdl2:create-texture (or renderer *renderer*)
-                                      pixel-format :target width height)))
+                                      pixel-format
+                                      :target
+                                      (round width)
+                                      (round height))))
     (when blend-mode
       (sdl2:set-texture-blend-mode texture blend-mode))
     texture))
@@ -77,6 +81,18 @@
      (sdl2:set-render-target *renderer* ,texture)
      ,@body
      (sdl2:set-render-target *renderer* nil)))
+
+@export
+(defmacro with-new-render-texture (size (&key renderer (pixel-format :rgba8888)
+                                           blend-mode)
+                                   &body body)
+  (with-gensyms (texture)
+    `(let ((,texture (make-texture (w ,size) (h ,size)
+                                   :renderer ,renderer :pixel-format ,pixel-format
+                                   :blend-mode ,blend-mode)))
+       (with-render-texture ,texture
+         ,@body)
+       ,texture)))
 
 (defmacro with-drawing-color (color renderer &body body)
   `(if ,color
@@ -89,9 +105,10 @@
 
 @export
 (defun clear-screen (&key renderer color)
-  (let ((renderer (or renderer *renderer*)))
-    (with-drawing-color color renderer
-      (sdl2:render-clear renderer))))
+  (when (not *parent-scene*)
+    (let ((renderer (or renderer *renderer*)))
+      (with-drawing-color color renderer
+        (sdl2:render-clear renderer)))))
 
 @export
 (defun clear-area (area &key renderer color blend-mode)
@@ -104,14 +121,97 @@
       (sdl2:set-render-draw-blend-mode renderer :none))))
 
 @export
-(defun draw-rect (area &key renderer color blend-mode)
+(defun draw-point (point &key renderer color blend-mode)
+  (let ((renderer (or renderer *renderer*)))
+    (sdl2:set-render-draw-blend-mode renderer blend-mode)
+    (with-drawing-color color renderer
+      (sdl2:render-draw-point renderer (x point) (y point)))))
+
+@export
+(defun draw-rect (area &key renderer color blend-mode (thickness 1))
   (let ((renderer (or renderer *renderer*)))
     (when blend-mode
       (sdl2:set-render-draw-blend-mode renderer blend-mode))
     (with-drawing-color color renderer
-      (sdl2:render-draw-rect renderer (area-to-rect area)))
+      (loop for i from 0 below thickness
+            for a = (grow-area (- i) area)
+            do (sdl2:render-draw-rect renderer (area-to-rect a))))
     (when blend-mode
       (sdl2:set-render-draw-blend-mode renderer :none))))
+
+@export
+(defun draw-circle (point radius
+                    &key renderer color (thickness 1)
+                      (quadrants (list 0 1 2 3)))
+  (let ((renderer (or renderer *renderer*))
+        (quadrants (loop for q in (ensure-list quadrants)
+                          sum (expt 2 q))))
+    #+ () (when blend-mode
+            (sdl2:set-render-draw-blend-mode renderer blend-mode))
+    (with-drawing-color color renderer
+      (dotimes (i thickness)
+        (declare (optimize (speed 3)))
+        (loop with radius = (+ radius i)
+              with diameter = (* radius 2)
+              with px = (round (x point))
+              with py = (round (y point))
+              with x = (- radius 1)
+              with y = 0
+              with tx = 1
+              with ty = 1
+              with error = (- tx diameter)
+              while (>= x y) do
+                (progn
+                  (when (> (logand quadrants 1) 0)
+                    (sdl2:render-draw-point renderer (- px x) (- py y))
+                    (sdl2:render-draw-point renderer (- px y) (- py x)))
+                  (when (> (logand quadrants 2) 0)
+                    (sdl2:render-draw-point renderer (+ px x) (- py y))
+                    (sdl2:render-draw-point renderer (+ px y) (- py x)))
+                  (when (> (logand quadrants 4) 0)
+                    (sdl2:render-draw-point renderer (- px y) (+ py x))
+                    (sdl2:render-draw-point renderer (- px x) (+ py y)))
+                  (when (> (logand quadrants 8) 0)
+                    (sdl2:render-draw-point renderer (+ px y) (+ py x))
+                    (sdl2:render-draw-point renderer (+ px x) (+ py y))))
+                (if (> error 0)
+                    (progn (decf x)
+                           (incf tx 2)
+                           (incf error (- tx diameter)))
+                    (progn (incf y)
+                           (incf error ty)
+                           (incf ty 2))))))
+    #+ () (when blend-mode
+            (sdl2:set-render-draw-blend-mode renderer :none))))
+
+@export
+(defun draw-rounded-rect (area corner-radius
+                          &key renderer color (thickness 1))
+  (let ((renderer (or renderer *renderer*)))
+    (with-access (x y w h) (grow-area (- thickness) area)
+      (loop for point
+              in (list (point (+ x corner-radius) (+ y corner-radius))
+                       (point (- (+ x w) corner-radius) (+ y corner-radius))
+                       (point (+ x corner-radius) (- (+ y h) corner-radius))
+                       (point (- (+ x w) corner-radius) (- (+ y h) corner-radius)))
+            for quadrant from 0 to 3
+            do (draw-circle point corner-radius
+                            :renderer renderer :color color ;; :blend-mode blend-mode
+                            :thickness thickness :quadrants quadrant))
+      (loop for area
+              in (list (area (+ x corner-radius 1) (- y thickness -2)
+                             (- w (* corner-radius 2) 1) thickness)
+                       (area (+ x corner-radius 1) (+ y h -1)
+                             (- w (* corner-radius 2) 1) thickness)
+                       (area (- x thickness -2) (+ y corner-radius 1)
+                             thickness (- h (* corner-radius 2) 1))
+                       (area (+ x (- w 1)) (+ y corner-radius 1)
+                             thickness (- h (* corner-radius 2) 1)))
+            do (clear-area area
+                           :renderer renderer
+                           :color color
+                           ;;:blend-mode blend-mode
+                           )))))
 
 (defmacro with-texture-color (texture color &body body)
   `(if ,color
@@ -203,3 +303,8 @@
                        (fit-size (texture-size source-texture) thumbnail-size)
                        (make-area (point 0 0) thumbnail-size))))
       texture)))
+
+@export
+(defun set-render-draw-blend-mode (blend-mode &key renderer)
+  (let ((renderer (or renderer *renderer*)))
+    (sdl2:set-render-draw-blend-mode renderer blend-mode)))

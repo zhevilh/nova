@@ -17,6 +17,7 @@
 	  (progn
 	    (sdl2-mixer:init ,@flags)
 	    (sdl2-mixer:open-audio 44100 :s16sys 2 1024)
+            (sdl2-mixer:allocate-channels 16)
 	    ,@body)
        (loop for m being the hash-values in *loaded-music*
              do (sdl2-mixer:free-music (pointer m)))
@@ -77,16 +78,28 @@
   *music-volume*)
 
 @export
-(defun play-sample (sample &key (channel -1))
-  (sdl2-mixer:play-channel channel (pointer sample) 0))
+(defun play-sample (sample &key (channel -1) (loops 0))
+  (sdl2-mixer:play-channel channel (pointer sample) loops))
 
 @export
 (defun pause-sample (&optional (channel -1))
   (sdl2-mixer:halt-channel channel))
 
 @export
+(defun allocate-channels (nb)
+  (sdl2-mixer:allocate-channels nb))
+
+@export
 (defun set-channel-volume (volume &optional (channel -1))
-  (sdl2-mixer:volume channel (max 0 (round (* volume 127)))))
+  (sdl2-mixer:volume channel (round (* volume 127))))
+
+@export
+(defun set-channel-position (angle distance &optional (channel -1))
+  (when (= 0 (sdl2-mixer::mix-set-position
+              channel
+              (round angle)
+              (round (* (clamp distance 0 1) 255))))
+    (format t "Mix_SetPosition: ~a~%" (sdl2::sdl-get-error))))
 
 @export
 (defun music-playing? ()
